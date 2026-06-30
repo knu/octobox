@@ -588,8 +588,111 @@ var Octobox = (function() {
   };
 
   var removeCurrent = function() {
+    saveActiveSidebarAnchorPosition();
     var current = document.querySelector("td.js-current");
     if (current) current.classList.remove("current", "js-current");
+  };
+
+  var sidebarAnchorStorageKey = "octobox:sidebar-anchor";
+
+  var notificationSidebar = function() {
+    var sidebar = document.querySelector(".flex-sidebar");
+    return sidebar && sidebar.querySelector(".nav-filters") ? sidebar : null;
+  };
+
+  var sidebarAnchor = function() {
+    try {
+      return JSON.parse(sessionStorage.getItem(sidebarAnchorStorageKey));
+    } catch (e) {
+      return null;
+    }
+  };
+
+  var sidebarLinkByHref = function(sidebar, href) {
+    var links = sidebar.querySelectorAll(".nav-link");
+    for (var i = 0; i < links.length; i++) {
+      if (links[i].href === href) return links[i];
+    }
+
+    return null;
+  };
+
+  var sidebarLinkOffset = function(sidebar, link) {
+    return link.getBoundingClientRect().top - sidebar.getBoundingClientRect().top;
+  };
+
+  var scrollSidebarLinkIntoView = function(sidebar, link) {
+    var top = sidebarLinkOffset(sidebar, link);
+    var bottom = top + link.offsetHeight;
+
+    if (top < 0) {
+      sidebar.scrollTop += top;
+    } else if (bottom > sidebar.clientHeight) {
+      sidebar.scrollTop += bottom - sidebar.clientHeight;
+    }
+  };
+
+  var saveSidebarAnchorPosition = function(link) {
+    var sidebar = notificationSidebar();
+    if (!sidebar || !link) return;
+
+    var anchor = {
+      href: link.href,
+      from: location.href,
+      offset: sidebarLinkOffset(sidebar, link)
+    };
+
+    try {
+      sessionStorage.setItem(sidebarAnchorStorageKey, JSON.stringify(anchor));
+    } catch (e) {}
+  };
+
+  var saveActiveSidebarAnchorPosition = function() {
+    var sidebar = notificationSidebar();
+    if (!sidebar) return;
+
+    var anchor = sidebarAnchor();
+    var activeLink = sidebar.querySelector(".nav-link.active");
+    if (anchor && anchor.from === location.href && activeLink && anchor.href !== activeLink.href) return;
+
+    saveSidebarAnchorPosition(activeLink);
+  };
+
+  var saveClickedSidebarAnchorPosition = function(event) {
+    var link = event.target.closest(".flex-sidebar .nav-link");
+    if (!link || !notificationSidebar()) return;
+
+    saveSidebarAnchorPosition(link);
+  };
+
+  var trackSidebarNavigation = function() {
+    if (window.sidebarNavigationTracked) return;
+
+    window.sidebarNavigationTracked = true;
+    document.addEventListener("click", saveClickedSidebarAnchorPosition, true);
+  };
+
+  var restoreSidebarAnchorPosition = function() {
+    var sidebar = notificationSidebar();
+    if (!sidebar) return;
+
+    var anchor = sidebarAnchor();
+
+    requestAnimationFrame(function() {
+      var activeLink = sidebar.querySelector(".nav-link.active");
+      var link = null;
+
+      if (anchor && anchor.href === location.href) {
+        link = activeLink && activeLink.href === anchor.href ? activeLink : sidebarLinkByHref(sidebar, anchor.href);
+
+        if (link) {
+          sidebar.scrollTop += sidebarLinkOffset(sidebar, link) - anchor.offset;
+          return;
+        }
+      }
+
+      if (activeLink) scrollSidebarLinkIntoView(sidebar, activeLink);
+    });
   };
 
   var closeThread = function(link) {
@@ -628,6 +731,8 @@ var Octobox = (function() {
   var initialize = function() {
     enableTooltips();
     enablePopOvers();
+    trackSidebarNavigation();
+    restoreSidebarAnchorPosition();
 
     setViewportHeight();
     window.addEventListener('resize', setViewportHeight);
