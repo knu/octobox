@@ -1,4 +1,7 @@
 class Subject < ApplicationRecord
+  CHECK_RUN_FAILURE_CONCLUSIONS = %w[action_required cancelled failure startup_failure timed_out].freeze
+  private_constant :CHECK_RUN_FAILURE_CONCLUSIONS
+
   has_many :notifications, foreign_key: :subject_url, primary_key: :url
   has_many :labels, dependent: :delete_all
   has_many :users, through: :notifications
@@ -101,10 +104,12 @@ class Subject < ApplicationRecord
   end
 
   def update_status
-    if sha.present?
+    if sha.present? && github_client
       remote_status = download_status
-      if remote_status.present?
-        self.status = assign_status(remote_status)
+      remote_status = download_check_runs_status if remote_status.nil?
+
+      if remote_status != false
+        self.status = remote_status
         self.save if changed?
       end
     end
@@ -175,6 +180,8 @@ class Subject < ApplicationRecord
   end
 
   def assign_status(remote_status)
+    return false unless remote_status.respond_to?(:state)
+
     if remote_status.state == 'pending'
       remote_status.statuses.present? ? remote_status.state : nil
     else
@@ -184,9 +191,27 @@ class Subject < ApplicationRecord
 
   def download_status
     return unless github_client
-    github_client.combined_status(repository_full_name, sha)
+    assign_status(github_client.combined_status(repository_full_name, sha))
   rescue Octokit::ClientError
-    nil
+    false
+  end
+
+  def download_check_runs_status
+    return unless github_client
+    assign_check_runs_status(github_client.check_runs_for_ref(repository_full_name, sha).check_runs)
+  rescue Octokit::ClientError
+    false
+  end
+
+  def assign_check_runs_status(check_runs)
+    return nil if check_runs.blank?
+    return "pending" if check_runs.any? { |check_run| check_run.status != "completed" }
+
+    if check_runs.any? { |check_run| CHECK_RUN_FAILURE_CONCLUSIONS.include?(check_run.conclusion) }
+      "failure"
+    else
+      "success"
+    end
   end
 
   #example https://api.github.com/repos/octobox/octobox/issues/1141/comments

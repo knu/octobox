@@ -67,6 +67,64 @@ class SubjectTest < ActiveSupport::TestCase
     assert_equal 'success', subject.status
   end
 
+  test 'sync_status falls back to check runs when commit statuses are empty' do
+    sha = 'a10867b14bb761a232cd80139fbd4c0d33264240'
+    user = create(:user)
+    notification = create(:notification, user: user)
+    subject = create(:subject, url: notification.subject_url, status: nil, sha: sha)
+
+    stub_status_request(sha, state: 'pending', statuses: [])
+    stub_check_runs_request(sha, check_runs: [
+      { status: 'completed', conclusion: 'success' },
+      { status: 'completed', conclusion: 'neutral' },
+      { status: 'completed', conclusion: 'skipped' }
+    ])
+
+    Subject.sync_status(sha, 'octobox/octobox')
+
+    subject.reload
+
+    assert_equal 'success', subject.status
+  end
+
+  test 'sync_status marks failing check runs as failure' do
+    sha = 'a10867b14bb761a232cd80139fbd4c0d33264240'
+    user = create(:user)
+    notification = create(:notification, user: user)
+    subject = create(:subject, url: notification.subject_url, status: nil, sha: sha)
+
+    stub_status_request(sha, state: 'pending', statuses: [])
+    stub_check_runs_request(sha, check_runs: [
+      { status: 'completed', conclusion: 'success' },
+      { status: 'completed', conclusion: 'failure' }
+    ])
+
+    Subject.sync_status(sha, 'octobox/octobox')
+
+    subject.reload
+
+    assert_equal 'failure', subject.status
+  end
+
+  test 'sync_status marks running check runs as pending' do
+    sha = 'a10867b14bb761a232cd80139fbd4c0d33264240'
+    user = create(:user)
+    notification = create(:notification, user: user)
+    subject = create(:subject, url: notification.subject_url, status: nil, sha: sha)
+
+    stub_status_request(sha, state: 'pending', statuses: [])
+    stub_check_runs_request(sha, check_runs: [
+      { status: 'completed', conclusion: 'success' },
+      { status: 'in_progress', conclusion: nil }
+    ])
+
+    Subject.sync_status(sha, 'octobox/octobox')
+
+    subject.reload
+
+    assert_equal 'pending', subject.status
+  end
+
   test 'sync updates comment_count of an issue' do
     remote_subject = load_fixture('subject_56.json')
     subject = create(:subject)
@@ -424,5 +482,28 @@ class SubjectTest < ActiveSupport::TestCase
 
   def load_fixture(filename)
     Oj.load(file_fixture(filename).read)
+  end
+
+  private
+
+  def stub_status_request(sha, state:, statuses:)
+    url = "https://api.github.com/repos/octobox/octobox/commits/#{sha}/status"
+    body = {
+      state: state,
+      statuses: statuses,
+      sha: sha
+    }.to_json
+    response = { status: 200, body: body, headers: { 'Content-Type' => 'application/json' } }
+    stub_request(:get, url).and_return(response)
+  end
+
+  def stub_check_runs_request(sha, check_runs:)
+    body = {
+      total_count: check_runs.length,
+      check_runs: check_runs
+    }.to_json
+    response = { status: 200, body: body, headers: { 'Content-Type' => 'application/json' } }
+    stub_request(:get, %r{https://api.github.com/repos/octobox/octobox/commits/#{sha}/check-runs})
+      .and_return(response)
   end
 end

@@ -30,6 +30,10 @@ class HooksController < ApplicationController
       MarketplacePurchaseWorker.perform_async_if_configured(payload)  if ['purchased', 'cancelled', 'changed'].include?(payload['action'])
     when 'status'
       SyncStatusWorker.perform_async_if_configured(payload['sha'], payload['name'])
+    when 'check_run'
+      SyncStatusWorker.perform_async_if_configured(payload['check_run']['head_sha'], payload['repository']['full_name'])
+    when 'check_suite'
+      SyncStatusWorker.perform_async_if_configured(payload['check_suite']['head_sha'], payload['repository']['full_name'])
     when 'repository'
       SyncRepositoryWorker.perform_async_if_configured(payload['repository'])
     end

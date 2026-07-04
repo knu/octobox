@@ -84,6 +84,50 @@ class HooksControllerTest < ActionController::TestCase
     assert_equal subject.status, 'failure'
   end
 
+  test 'check_run webhook payload' do
+    stub_notifications_request
+    stub_repository_request
+    user = create(:user)
+    notification = create(:notification, user: user)
+    subject = create(:subject, repository_full_name: 'Codertocat/Hello-World',
+                               sha: 'a10867b14bb761a232cd80139fbd4c0d33264240',
+                               url: notification.subject_url)
+
+    statuses_url = "https://api.github.com/repos/Codertocat/Hello-World/commits/a10867b14bb761a232cd80139fbd4c0d33264240/status"
+    status_response = { status: 200, body: { state: 'pending', statuses: [] }.to_json, headers: { 'Content-Type' => 'application/json' } }
+    stub_request(:get, statuses_url).and_return(status_response)
+
+    check_runs_response = { status: 200, body: { total_count: 1, check_runs: [{ status: 'completed', conclusion: 'success' }] }.to_json, headers: { 'Content-Type' => 'application/json' } }
+    stub_request(:get, %r{https://api.github.com/repos/Codertocat/Hello-World/commits/a10867b14bb761a232cd80139fbd4c0d33264240/check-runs})
+      .and_return(check_runs_response)
+
+    send_webhook 'check_run'
+    subject.reload
+    assert_equal subject.status, 'success'
+  end
+
+  test 'check_suite webhook payload' do
+    stub_notifications_request
+    stub_repository_request
+    user = create(:user)
+    notification = create(:notification, user: user)
+    subject = create(:subject, repository_full_name: 'Codertocat/Hello-World',
+                               sha: 'a10867b14bb761a232cd80139fbd4c0d33264240',
+                               url: notification.subject_url)
+
+    statuses_url = "https://api.github.com/repos/Codertocat/Hello-World/commits/a10867b14bb761a232cd80139fbd4c0d33264240/status"
+    status_response = { status: 200, body: { state: 'pending', statuses: [] }.to_json, headers: { 'Content-Type' => 'application/json' } }
+    stub_request(:get, statuses_url).and_return(status_response)
+
+    check_runs_response = { status: 200, body: { total_count: 1, check_runs: [{ status: 'completed', conclusion: 'failure' }] }.to_json, headers: { 'Content-Type' => 'application/json' } }
+    stub_request(:get, %r{https://api.github.com/repos/Codertocat/Hello-World/commits/a10867b14bb761a232cd80139fbd4c0d33264240/check-runs})
+      .and_return(check_runs_response)
+
+    send_webhook 'check_suite'
+    subject.reload
+    assert_equal subject.status, 'failure'
+  end
+
   test 'repository webhook payload' do
     send_webhook 'repository'
     assert_equal Repository.count, 1
